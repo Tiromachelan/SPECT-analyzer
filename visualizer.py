@@ -125,14 +125,16 @@ def main() -> None:
     # --- slider --------------------------------------------------------------
     ax_slider = fig.add_axes([0.15, 0.06, 0.70, 0.04])
     slider = Slider(
-        ax_slider, "Slice", 1, 64, valinit=init_slice, valstep=1, valfmt="%d"
+        ax_slider, "Slice", 1, 64, valinit=init_slice, valstep=1,
     )
+    slider.valtext.set_text(f"{init_slice}/{n_slices(orientation[0])}")
 
     def update(val: float) -> None:
         idx = int(val) - 1
         orient = orientation[0]
         im1.set_data(get_slice(vol1, idx, orient))
         im2.set_data(get_slice(vol2, idx, orient))
+        slider.valtext.set_text(f"{int(val)}/{n_slices(orient)}")
         fig.canvas.draw_idle()
 
     def on_orient(label: str) -> None:
