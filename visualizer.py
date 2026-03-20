@@ -67,6 +67,8 @@ def main() -> None:
     ORIENTATIONS = ("Axial", "Coronal", "Sagittal")
     orientation: list[str] = ["Axial"]
 
+    mip_mode: list[bool] = [False]
+
     def get_slice(vol: np.ndarray, idx: int, orient: str) -> np.ndarray:
         """Return a 2-D cross-section for the given orientation and 0-based index."""
         if orient == "Axial":
@@ -75,6 +77,15 @@ def main() -> None:
             return vol[:, idx, :]    # (64, 128)
         else:                        # Sagittal
             return vol[:, :, idx]    # (64, 128)
+
+    def get_mip(vol: np.ndarray, orient: str) -> np.ndarray:
+        """Return a maximum-intensity projection along the depth axis."""
+        if orient == "Axial":
+            return vol.max(axis=0)   # collapse 64 slices → (128, 128)
+        elif orient == "Coronal":
+            return vol.max(axis=1)   # collapse 128 rows  → (64, 128)
+        else:                        # Sagittal
+            return vol.max(axis=2)   # collapse 128 cols  → (64, 128)
 
     def n_slices(orient: str) -> int:
         return 64 if orient == "Axial" else 128
@@ -115,8 +126,15 @@ def main() -> None:
     for ax in (ax1, ax2):
         ax.set_axis_off()
 
+    # --- mode radio buttons (Slice / MIP) ------------------------------------
+    ax_mode = fig.add_axes([0.01, 0.62, 0.11, 0.14])
+    ax_mode.set_title("Mode", fontsize=9)
+    radio_mode = RadioButtons(ax_mode, ("Slice", "MIP"), active=0)
+    for lbl in radio_mode.labels:
+        lbl.set_fontsize(9)
+
     # --- orientation radio buttons ------------------------------------------
-    ax_radio = fig.add_axes([0.01, 0.35, 0.11, 0.22])
+    ax_radio = fig.add_axes([0.01, 0.33, 0.11, 0.22])
     ax_radio.set_title("View", fontsize=9)
     radio = RadioButtons(ax_radio, ORIENTATIONS, active=0)
     for lbl in radio.labels:
@@ -129,31 +147,42 @@ def main() -> None:
     )
     slider.valtext.set_text(f"{init_slice}/{n_slices(orientation[0])}")
 
-    def update(val: float) -> None:
-        idx = int(val) - 1
+    def redraw() -> None:
         orient = orientation[0]
-        im1.set_data(get_slice(vol1, idx, orient))
-        im2.set_data(get_slice(vol2, idx, orient))
-        slider.valtext.set_text(f"{int(val)}/{n_slices(orient)}")
+        extent = make_extent(orient)
+        for im, ax in ((im1, ax1), (im2, ax2)):
+            im.set_extent(extent)
+            ax.set_aspect("equal")
+        if mip_mode[0]:
+            im1.set_data(get_mip(vol1, orient))
+            im2.set_data(get_mip(vol2, orient))
+            slider.valtext.set_text("MIP")
+        else:
+            idx = int(slider.val) - 1
+            im1.set_data(get_slice(vol1, idx, orient))
+            im2.set_data(get_slice(vol2, idx, orient))
+            slider.valtext.set_text(f"{int(slider.val)}/{n_slices(orient)}")
         fig.canvas.draw_idle()
+
+    def update(val: float) -> None:
+        if not mip_mode[0]:
+            redraw()
 
     def on_orient(label: str) -> None:
         orientation[0] = label
         new_max = n_slices(label)
-        # Update slider range to match the new orientation's depth
         slider.valmax = new_max
         slider.ax.set_xlim(slider.valmin, new_max)
         new_val = min(int(slider.val), new_max)
-        # Update image extent so axes resize to match the new slice shape
-        extent = make_extent(label)
-        for im, ax in ((im1, ax1), (im2, ax2)):
-            im.set_extent(extent)
-            ax.set_aspect("equal")
         slider.set_val(new_val)
-        # set_val fires on_changed; if val didn't change, force a redraw
-        if new_val == int(slider.val):
-            update(new_val)
+        redraw()
 
+    def on_mode(label: str) -> None:
+        mip_mode[0] = label == "MIP"
+        slider.ax.set_visible(not mip_mode[0])
+        redraw()
+
+    radio_mode.on_clicked(on_mode)
     radio.on_clicked(on_orient)
     slider.on_changed(update)
 
