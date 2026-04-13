@@ -17,8 +17,8 @@ SPECT-analyzer is a single-script Python tool for side-by-side comparison of SPE
 - Python 3.14, single-file architecture (`visualizer.py`).
 - Type hints on function signatures (`-> np.ndarray`, `-> tuple[str, str]`).
 - Docstrings on public functions; section comments with `# --- label ---` dividers.
-- Visualization uses **matplotlib** with `matplotlib.widgets.Slider` for interactivity.
-- File selection via **tkinter** `filedialog` as fallback when CLI args aren't provided.
+- Visualization uses **matplotlib** with `matplotlib.widgets.Slider`, `RadioButtons`, and `Button` for interactivity.
+- File selection via in-window `Button` widgets that open a **tkinter** `filedialog` on click.
 
 ## Build and Run
 
@@ -28,10 +28,10 @@ The project uses **uv** for dependency management (`uv.lock` is committed).
 # Install dependencies
 uv sync
 
-# Run with file picker dialogs
+# Run — window opens immediately; use the in-window buttons to load files
 uv run visualizer.py
 
-# Run with explicit file paths
+# CLI fast path — loads both files immediately, bypasses the dialogs
 uv run visualizer.py path/to/first.raw path/to/second.raw
 
 # Or activate the venv manually
@@ -75,6 +75,18 @@ Two tiers of metrics are shown:
 ### Shared mutable state in closures
 
 Widget callbacks share state through single-element lists (`orientation: list[str] = ["Axial"]`, `mip_mode: list[bool] = [False]`). This avoids `nonlocal` and is the established pattern — continue using it for any new shared state.
+
+Volume data is stored as `vols: list[np.ndarray | None] = [None, None]` and file paths as `paths: list[str | None] = [None, None]`. Either slot can be `None` before the user selects a file.
+
+### File loading flow
+
+The window opens immediately with blank placeholder panels. Each reconstruction panel has a `Button` widget below it labeled "Choose File" (changes to "Change File" after loading).
+
+- `open_file(idx)` — opens tkinter dialog, loads+normalizes the volume, updates the panel title and placeholder visibility, changes the button label, then calls `refresh_state()`.
+- `refresh_state()` — checks which vols are loaded; if both are present, recomputes volume metrics and calls `redraw()`; otherwise clears metrics text and shows the SSIM placeholder.
+- `redraw()` — guards against `None` entries in `vols`; only updates panels whose data is available.
+
+`Button` widget refs (`btn1`, `btn2`) must be kept as variables to prevent garbage collection from disconnecting callbacks.
 
 ## Key Dependencies
 
