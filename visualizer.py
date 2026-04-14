@@ -174,6 +174,24 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
+        # file selection buttons
+        self._file_btns: list[QPushButton] = []
+        self._fname_labels: list[QLabel] = []
+        for i in range(2):
+            grp = QGroupBox(f"File {i + 1}")
+            glay = QVBoxLayout(grp)
+            btn = QPushButton("Choose File")
+            lbl = QLabel("—")
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("color: gray; font-size: 8pt;")
+            glay.addWidget(btn)
+            glay.addWidget(lbl)
+            layout.addWidget(grp)
+            self._file_btns.append(btn)
+            self._fname_labels.append(lbl)
+        self._file_btns[0].clicked.connect(lambda: self._pick_file(0))
+        self._file_btns[1].clicked.connect(lambda: self._pick_file(1))
+
         # mode (Slice / MIP)
         grp_mode = QGroupBox("Mode")
         mode_lay = QVBoxLayout(grp_mode)
@@ -237,7 +255,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return panel
 
-    def _build_canvas(self) -> QWidget:
+    def _build_canvas(self) -> FigureCanvasQTAgg:
         blank = np.zeros(_slice_shape("Axial"))
         extent = _make_extent("Axial")
 
@@ -268,11 +286,11 @@ class MainWindow(QMainWindow):
         _ph_kw = dict(ha="center", va="center", fontsize=11, color="gray")
         self._placeholders = [
             self._ax1.text(
-                0.5, 0.5, "No file loaded",
+                0.5, 0.5, "No file loaded\nClick 'Choose File'",
                 transform=self._ax1.transAxes, **_ph_kw,
             ),
             self._ax2.text(
-                0.5, 0.5, "No file loaded",
+                0.5, 0.5, "No file loaded\nClick 'Choose File'",
                 transform=self._ax2.transAxes, **_ph_kw,
             ),
             self._ax3.text(
@@ -285,36 +303,7 @@ class MainWindow(QMainWindow):
         canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-
-        # file buttons row below the canvas
-        self._file_btns: list[QPushButton] = []
-        self._fname_labels: list[QLabel] = []
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        for i in range(2):
-            btn = QPushButton(f"Choose File {i + 1}")
-            lbl = QLabel("—")
-            lbl.setWordWrap(True)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet("color: gray; font-size: 8pt;")
-            cell = QVBoxLayout()
-            cell.setSpacing(2)
-            cell.addWidget(btn)
-            cell.addWidget(lbl)
-            btn_row.addLayout(cell, stretch=1)
-            self._file_btns.append(btn)
-            self._fname_labels.append(lbl)
-        btn_row.addStretch(1)  # spacer aligned with the SSIM panel
-        self._file_btns[0].clicked.connect(lambda: self._pick_file(0))
-        self._file_btns[1].clicked.connect(lambda: self._pick_file(1))
-
-        wrapper = QWidget()
-        vlay = QVBoxLayout(wrapper)
-        vlay.setContentsMargins(0, 0, 0, 0)
-        vlay.setSpacing(4)
-        vlay.addWidget(canvas, stretch=1)
-        vlay.addLayout(btn_row)
-        return wrapper
+        return canvas
 
     # --- file loading --------------------------------------------------------
 
