@@ -584,8 +584,9 @@ class MainWindow(QMainWindow):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        from PySide6.QtWidgets import QApplication
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        all_btns = self._file_btns + self._recon_btns
+        for btn in all_btns:
+            btn.setEnabled(False)
         try:
             if self._recon_model is None or self._recon_model_path != pth_path:
                 self._recon_model = _model.load_model(pth_path, device)
@@ -596,7 +597,8 @@ class MainWindow(QMainWindow):
             print(f"Reconstruction error: {e}", file=sys.stderr)
             return
         finally:
-            QApplication.restoreOverrideCursor()
+            for btn in all_btns:
+                btn.setEnabled(True)
 
         label = f"[recon] {Path(sino_path).name}"
         self._paths[idx] = sino_path
