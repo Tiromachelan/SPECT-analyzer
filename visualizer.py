@@ -8,6 +8,8 @@ canvas.
 
 import sys
 import math
+from pathlib import Path
+
 import numpy as np
 import matplotlib
 
@@ -282,6 +284,8 @@ class MainWindow(QMainWindow):
         self._mask_enabled: bool = False
         self._mask_threshold: float = 0.0
         self._auto_threshold: float = 0.0
+        self._recon_model = None
+        self._recon_model_path: str | None = None
 
         self._build_ui()
 
@@ -334,6 +338,7 @@ class MainWindow(QMainWindow):
         self._file_btns: list[QPushButton] = []
         self._fname_labels: list[QLabel] = []
         self._overlay_checks: list[QCheckBox] = []
+        self._recon_btns: list[QPushButton] = []
         for i in range(2):
             grp = QGroupBox(f"File {i + 1}")
             glay = QVBoxLayout(grp)
@@ -343,13 +348,16 @@ class MainWindow(QMainWindow):
             lbl.setStyleSheet("color: gray; font-size: 8pt;")
             overlay_cb = QCheckBox("SSIM Overlay")
             overlay_cb.setEnabled(False)
+            recon_btn = QPushButton("Reconstruct…")
             glay.addWidget(btn)
             glay.addWidget(lbl)
             glay.addWidget(overlay_cb)
+            glay.addWidget(recon_btn)
             layout.addWidget(grp)
             self._file_btns.append(btn)
             self._fname_labels.append(lbl)
             self._overlay_checks.append(overlay_cb)
+            self._recon_btns.append(recon_btn)
         self._file_btns[0].clicked.connect(lambda: self._pick_file(0))
         self._file_btns[1].clicked.connect(lambda: self._pick_file(1))
         self._overlay_checks[0].toggled.connect(
@@ -358,6 +366,8 @@ class MainWindow(QMainWindow):
         self._overlay_checks[1].toggled.connect(
             lambda checked: self._on_overlay_toggled(1, checked)
         )
+        self._recon_btns[0].clicked.connect(lambda: self._on_reconstruct_clicked(0))
+        self._recon_btns[1].clicked.connect(lambda: self._on_reconstruct_clicked(1))
 
         # mode (Slice / MIP)
         grp_mode = QGroupBox("Mode")
@@ -520,15 +530,77 @@ class MainWindow(QMainWindow):
         except (ValueError, FileNotFoundError) as e:
             print(f"Error loading '{path}': {e}", file=sys.stderr)
             return
-        self._vols[idx] = vol
+        label = Path(path).name
         self._paths[idx] = path
-        self._auto_threshold = 0.0  # reset so _refresh_state recomputes for new pair
-        fname = path.rsplit("/", 1)[-1]
-        [self._ax1, self._ax2][idx].set_title(fname)
-        self._fname_labels[idx].setText(fname)
+        self._load_vol(idx, vol, label)
+
+    def _load_vol(self, idx: int, vol: np.ndarray, label: str) -> None:
+        """Load a pre-computed normalised volume into panel *idx*."""
+        self._vols[idx] = vol
+        self._auto_threshold = 0.0
+        [self._ax1, self._ax2][idx].set_title(label)
+        self._fname_labels[idx].setText(label)
         self._file_btns[idx].setText("Change File")
         self._placeholders[idx].set_visible(False)
         self._refresh_state()
+
+    # --- reconstruction ------------------------------------------------------
+
+    @staticmethod
+    def _find_default_pth() -> str | None:
+        """Return the first .pth file next to visualizer.py, preferring model_*.pth."""
+        here = Path(__file__).parent
+        preferred = sorted(here.glob("model_*.pth"))
+        if preferred:
+            return str(preferred[0])
+        fallback = sorted(here.glob("*.pth"))
+        return str(fallback[0]) if fallback else None
+
+    def _on_reconstruct_clicked(self, idx: int) -> None:
+        import torch
+        import model as _model
+
+        # resolve model .pth
+        pth_path = self._recon_model_path or self._find_default_pth()
+        if not pth_path:
+            pth_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select model checkpoint (.pth)",
+                "",
+                "PyTorch checkpoints (*.pth);;All files (*.*)",
+            )
+        if not pth_path:
+            return
+
+        # pick sinogram
+        sino_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select sinogram for File {idx + 1}",
+            "",
+            "Raw files (*.raw);;All files (*.*)",
+        )
+        if not sino_path:
+            return
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            if self._recon_model is None or self._recon_model_path != pth_path:
+                self._recon_model = _model.load_model(pth_path, device)
+                self._recon_model_path = pth_path
+            vol = _model.reconstruct_sinogram(self._recon_model, sino_path, device)
+            vol = _norm(vol)
+        except Exception as e:
+            print(f"Reconstruction error: {e}", file=sys.stderr)
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        label = f"[recon] {Path(sino_path).name}"
+        self._paths[idx] = sino_path
+        self._load_vol(idx, vol, label)
 
     # --- state / redraw ------------------------------------------------------
 
