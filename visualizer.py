@@ -286,6 +286,8 @@ class MainWindow(QMainWindow):
         self._auto_threshold: float = 0.0
         self._recon_model = None
         self._recon_model_path: str | None = None
+        self._brightness: float = 0.5
+        self._contrast: float = 1.0
 
         self._build_ui()
 
@@ -414,6 +416,38 @@ class MainWindow(QMainWindow):
         cmap_lay.addWidget(self._cmap_combo)
         layout.addWidget(grp_cmap)
         self._cmap_combo.currentTextChanged.connect(self._on_cmap_changed)
+
+        # brightness / contrast
+        grp_bc = QGroupBox("Brightness / Contrast")
+        bc_lay = QVBoxLayout(grp_bc)
+        bc_lay.setSpacing(2)
+
+        bc_lay.addWidget(QLabel("Brightness"))
+        self._brightness_slider = QSlider(Qt.Orientation.Horizontal)
+        self._brightness_slider.setMinimum(0)
+        self._brightness_slider.setMaximum(100)
+        self._brightness_slider.setValue(50)
+        self._brightness_val_label = QLabel("0.50")
+        self._brightness_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bc_lay.addWidget(self._brightness_slider)
+        bc_lay.addWidget(self._brightness_val_label)
+
+        bc_lay.addWidget(QLabel("Contrast"))
+        self._contrast_slider = QSlider(Qt.Orientation.Horizontal)
+        self._contrast_slider.setMinimum(1)
+        self._contrast_slider.setMaximum(200)
+        self._contrast_slider.setValue(100)
+        self._contrast_val_label = QLabel("1.00")
+        self._contrast_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bc_lay.addWidget(self._contrast_slider)
+        bc_lay.addWidget(self._contrast_val_label)
+
+        self._bc_reset_btn = QPushButton("Reset")
+        bc_lay.addWidget(self._bc_reset_btn)
+        layout.addWidget(grp_bc)
+        self._brightness_slider.valueChanged.connect(self._on_brightness_changed)
+        self._contrast_slider.valueChanged.connect(self._on_contrast_changed)
+        self._bc_reset_btn.clicked.connect(self._on_bc_reset)
 
         # slice slider
         grp_slice = QGroupBox("Slice")
@@ -693,6 +727,10 @@ class MainWindow(QMainWindow):
             else:
                 ov.set_visible(False)
 
+        vmin = self._brightness - self._contrast / 2
+        vmax = self._brightness + self._contrast / 2
+        self._im1.set_clim(vmin, vmax)
+        self._im2.set_clim(vmin, vmax)
         self._fig.canvas.draw_idle()
 
     # --- Qt signal handlers --------------------------------------------------
@@ -752,6 +790,29 @@ class MainWindow(QMainWindow):
         self._mask_slider.blockSignals(False)
         self._mask_val_label.setText(f"{self._auto_threshold:.3f}")
         self._refresh_state()
+
+    def _on_brightness_changed(self, val: int) -> None:
+        self._brightness = val / 100.0
+        self._brightness_val_label.setText(f"{self._brightness:.2f}")
+        self._redraw()
+
+    def _on_contrast_changed(self, val: int) -> None:
+        self._contrast = val / 100.0
+        self._contrast_val_label.setText(f"{self._contrast:.2f}")
+        self._redraw()
+
+    def _on_bc_reset(self) -> None:
+        self._brightness_slider.blockSignals(True)
+        self._contrast_slider.blockSignals(True)
+        self._brightness_slider.setValue(50)
+        self._contrast_slider.setValue(100)
+        self._brightness_slider.blockSignals(False)
+        self._contrast_slider.blockSignals(False)
+        self._brightness = 0.5
+        self._contrast = 1.0
+        self._brightness_val_label.setText("0.50")
+        self._contrast_val_label.setText("1.00")
+        self._redraw()
 
 
 # --- entry point -------------------------------------------------------------
