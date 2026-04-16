@@ -7,6 +7,7 @@ canvas.
 """
 
 import sys
+import math
 import numpy as np
 import matplotlib
 
@@ -15,6 +16,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.colors import LinearSegmentedColormap
 from skimage.metrics import structural_similarity
+from skimage.filters import threshold_otsu
+from skimage.morphology import binary_erosion, square
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -111,24 +114,98 @@ plt.colormaps.register(_hot_metal_blue)
 
 # --- pure metric functions ---------------------------------------------------
 
+def compute_mask_threshold(v1: np.ndarray, v2: np.ndarray) -> float:
+    """Return an Otsu threshold on max(v1, v2), clipped to [0.02, 0.50]."""
+    joint = np.maximum(v1, v2).ravel()
+    try:
+        t = float(threshold_otsu(joint))
+    except Exception:
+        t = 0.10
+    return float(np.clip(t, 0.02, 0.50))
+
+
 def compute_slice_metrics(
-    s1: np.ndarray, s2: np.ndarray
+    s1: np.ndarray,
+    s2: np.ndarray,
+    mask: np.ndarray | None = None,
 ) -> tuple[float, float, float, np.ndarray]:
-    """Return (MSE, MAE, SSIM_scalar, SSIM_map) for two 2-D slices in [0, 1]."""
-    diff = s1.astype(np.float64) - s2.astype(np.float64)
+    """Return (MSE, MAE, SSIM_scalar, SSIM_map) for two 2-D slices in [0, 1].
+
+    If *mask* is provided (True = background pixel to exclude), MSE and MAE are
+    computed over foreground pixels only.  The SSIM scalar uses the eroded
+    foreground (interior pixels whose full 7×7 window lies in the foreground) to
+    avoid window-boundary contamination.  The returned SSIM map is a masked array
+    with background pixels masked out.  Returns NaN scalars when no valid pixels
+    exist.
+    """
+    s1f = s1.astype(np.float64)
+    s2f = s2.astype(np.float64)
+
+    if mask is not None:
+        fg = ~mask
+        if not fg.any():
+            blank = np.ma.masked_all(s1.shape)
+            return float("nan"), float("nan"), float("nan"), blank
+
+        diff = (s1f - s2f)[fg]
+        mse = float(np.mean(diff ** 2))
+        mae = float(np.mean(np.abs(diff)))
+
+        _, ssim_map_full = structural_similarity(s1f, s2f, full=True, data_range=1.0)
+        # erode foreground by SSIM window radius to get clean interior centers
+        valid_centers = binary_erosion(fg, square(7))
+        if valid_centers.any():
+            ssim_val = float(ssim_map_full[valid_centers].mean())
+        else:
+            ssim_val = float("nan")
+
+        ssim_map = np.ma.masked_where(mask, ssim_map_full)
+        return mse, mae, ssim_val, ssim_map
+
+    diff = s1f - s2f
     mse = float(np.mean(diff ** 2))
     mae = float(np.mean(np.abs(diff)))
-    ssim_val, ssim_map = structural_similarity(
-        s1.astype(np.float64),
-        s2.astype(np.float64),
-        full=True,
-        data_range=1.0,
-    )
+    ssim_val, ssim_map = structural_similarity(s1f, s2f, full=True, data_range=1.0)
     return mse, mae, float(ssim_val), ssim_map
 
 
-def compute_volume_metrics(v1: np.ndarray, v2: np.ndarray) -> tuple[float, float, float]:
-    """Return (MSE, MAE, SSIM) aggregated over the entire 3-D volume."""
+def compute_volume_metrics(
+    v1: np.ndarray,
+    v2: np.ndarray,
+    threshold: float | None = None,
+) -> tuple[float, float, float]:
+    """Return (MSE, MAE, SSIM) aggregated over the entire 3-D volume.
+
+    When *threshold* is given, MSE/MAE use only foreground voxels and SSIM is
+    weighted by each axial slice's valid-center count.
+    """
+    if threshold is not None:
+        mask3d = np.maximum(v1, v2) < threshold
+        fg3d = ~mask3d
+        if not fg3d.any():
+            return float("nan"), float("nan"), float("nan")
+        diff = (v1.astype(np.float64) - v2.astype(np.float64))[fg3d]
+        mse = float(np.mean(diff ** 2))
+        mae = float(np.mean(np.abs(diff)))
+        ssim_weighted = 0.0
+        total_weight = 0
+        for i in range(v1.shape[0]):
+            fg2d = fg3d[i]
+            if not fg2d.any():
+                continue
+            valid = binary_erosion(fg2d, square(7))
+            n = int(valid.sum())
+            if n == 0:
+                continue
+            _, sm = structural_similarity(
+                v1[i].astype(np.float64), v2[i].astype(np.float64),
+                data_range=1.0, full=True,
+            )
+            ssim_weighted += sm[valid].mean() * n
+            total_weight += n
+        ssim = ssim_weighted / total_weight if total_weight > 0 else float("nan")
+        return mse, mae, ssim
+
     diff = v1.astype(np.float64) - v2.astype(np.float64)
     mse = float(np.mean(diff ** 2))
     mae = float(np.mean(np.abs(diff)))
@@ -202,6 +279,9 @@ class MainWindow(QMainWindow):
         self._mip_mode: bool = False
         self._colormap: str = "hot_metal_blue"
         self._overlay_enabled: list[bool] = [False, False]
+        self._mask_enabled: bool = False
+        self._mask_threshold: float = 0.0
+        self._auto_threshold: float = 0.0
 
         self._build_ui()
 
@@ -339,6 +419,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(grp_slice)
         self._slice_slider.valueChanged.connect(self._on_slice_changed)
 
+        # mask controls
+        grp_mask = QGroupBox("Mask")
+        mask_lay = QVBoxLayout(grp_mask)
+        self._mask_check = QCheckBox("Enable")
+        self._mask_check.setEnabled(False)
+        self._mask_slider = QSlider(Qt.Orientation.Horizontal)
+        self._mask_slider.setMinimum(0)
+        self._mask_slider.setMaximum(1000)
+        self._mask_slider.setValue(0)
+        self._mask_slider.setEnabled(False)
+        self._mask_val_label = QLabel("0.000")
+        self._mask_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mask_auto_btn = QPushButton("Auto")
+        self._mask_auto_btn.setEnabled(False)
+        mask_lay.addWidget(self._mask_check)
+        mask_lay.addWidget(self._mask_slider)
+        mask_lay.addWidget(self._mask_val_label)
+        mask_lay.addWidget(self._mask_auto_btn)
+        layout.addWidget(grp_mask)
+        self._mask_check.toggled.connect(self._on_mask_toggled)
+        self._mask_slider.valueChanged.connect(self._on_mask_slider_changed)
+        self._mask_slider.sliderReleased.connect(self._on_mask_slider_released)
+        self._mask_auto_btn.clicked.connect(self._on_mask_auto_clicked)
+
         layout.addStretch()
         return panel
 
@@ -418,6 +522,7 @@ class MainWindow(QMainWindow):
             return
         self._vols[idx] = vol
         self._paths[idx] = path
+        self._auto_threshold = 0.0  # reset so _refresh_state recomputes for new pair
         fname = path.rsplit("/", 1)[-1]
         [self._ax1, self._ax2][idx].set_title(fname)
         self._fname_labels[idx].setText(fname)
@@ -430,11 +535,24 @@ class MainWindow(QMainWindow):
     def _refresh_state(self) -> None:
         both = self._vols[0] is not None and self._vols[1] is not None
         if both:
+            if self._auto_threshold == 0.0:
+                self._auto_threshold = compute_mask_threshold(
+                    self._vols[0], self._vols[1]
+                )
+                self._mask_threshold = self._auto_threshold
+                self._mask_slider.blockSignals(True)
+                self._mask_slider.setValue(round(self._auto_threshold * 1000))
+                self._mask_slider.blockSignals(False)
+                self._mask_val_label.setText(f"{self._auto_threshold:.3f}")
+            threshold = self._mask_threshold if self._mask_enabled else None
             v_mse, v_mae, v_ssim = compute_volume_metrics(
-                self._vols[0], self._vols[1]
+                self._vols[0], self._vols[1], threshold=threshold
             )
+            ssim_str = f"{v_ssim:.4f}" if not math.isnan(v_ssim) else "N/A"
+            mse_str = f"{v_mse:.4f}" if not math.isnan(v_mse) else "N/A"
+            mae_str = f"{v_mae:.4f}" if not math.isnan(v_mae) else "N/A"
             self._vol_label.setText(
-                f"Volume — MSE: {v_mse:.4f} | MAE: {v_mae:.4f} | SSIM: {v_ssim:.4f}"
+                f"Volume — MSE: {mse_str} | MAE: {mae_str} | SSIM: {ssim_str}"
             )
             self._placeholders[2].set_visible(False)
         else:
@@ -443,6 +561,9 @@ class MainWindow(QMainWindow):
             self._placeholders[2].set_visible(True)
         for cb in self._overlay_checks:
             cb.setEnabled(both)
+        self._mask_check.setEnabled(both)
+        self._mask_slider.setEnabled(both)
+        self._mask_auto_btn.setEnabled(both)
         self._redraw()
 
     def _redraw(self) -> None:
@@ -479,10 +600,16 @@ class MainWindow(QMainWindow):
 
         ssim_map: np.ndarray | None = None
         if s[0] is not None and s[1] is not None:
-            mse, mae, ssim_val, ssim_map = compute_slice_metrics(s[0], s[1])
+            mask_2d: np.ndarray | None = None
+            if self._mask_enabled and self._mask_threshold > 0:
+                mask_2d = np.maximum(s[0], s[1]) < self._mask_threshold
+            mse, mae, ssim_val, ssim_map = compute_slice_metrics(s[0], s[1], mask=mask_2d)
             self._im3.set_data(ssim_map)
+            ssim_str = f"{ssim_val:.4f}" if not math.isnan(ssim_val) else "N/A"
+            mse_str = f"{mse:.4f}" if not math.isnan(mse) else "N/A"
+            mae_str = f"{mae:.4f}" if not math.isnan(mae) else "N/A"
             self._metrics_label.setText(
-                f"{slice_label} — MSE: {mse:.4f} | MAE: {mae:.4f} | SSIM: {ssim_val:.4f}"
+                f"{slice_label} — MSE: {mse_str} | MAE: {mae_str} | SSIM: {ssim_str}"
             )
 
         for i, ov in enumerate((self._im1_overlay, self._im2_overlay)):
@@ -531,6 +658,26 @@ class MainWindow(QMainWindow):
     def _on_overlay_toggled(self, idx: int, checked: bool) -> None:
         self._overlay_enabled[idx] = checked
         self._redraw()
+
+    def _on_mask_toggled(self, checked: bool) -> None:
+        self._mask_enabled = checked
+        self._refresh_state()
+
+    def _on_mask_slider_changed(self, val: int) -> None:
+        self._mask_threshold = val / 1000.0
+        self._mask_val_label.setText(f"{self._mask_threshold:.3f}")
+        self._redraw()
+
+    def _on_mask_slider_released(self) -> None:
+        self._refresh_state()
+
+    def _on_mask_auto_clicked(self) -> None:
+        self._mask_threshold = self._auto_threshold
+        self._mask_slider.blockSignals(True)
+        self._mask_slider.setValue(round(self._auto_threshold * 1000))
+        self._mask_slider.blockSignals(False)
+        self._mask_val_label.setText(f"{self._auto_threshold:.3f}")
+        self._refresh_state()
 
 
 # --- entry point -------------------------------------------------------------
