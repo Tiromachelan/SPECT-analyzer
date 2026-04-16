@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QComboBox,
     QButtonGroup,
+    QCheckBox,
     QFileDialog,
     QSizePolicy,
 )
@@ -200,6 +201,7 @@ class MainWindow(QMainWindow):
         self._orientation: str = "Axial"
         self._mip_mode: bool = False
         self._colormap: str = "hot_metal_blue"
+        self._overlay_enabled: list[bool] = [False, False]
 
         self._build_ui()
 
@@ -251,6 +253,7 @@ class MainWindow(QMainWindow):
         # file selection buttons
         self._file_btns: list[QPushButton] = []
         self._fname_labels: list[QLabel] = []
+        self._overlay_checks: list[QCheckBox] = []
         for i in range(2):
             grp = QGroupBox(f"File {i + 1}")
             glay = QVBoxLayout(grp)
@@ -258,13 +261,23 @@ class MainWindow(QMainWindow):
             lbl = QLabel("—")
             lbl.setWordWrap(True)
             lbl.setStyleSheet("color: gray; font-size: 8pt;")
+            overlay_cb = QCheckBox("SSIM Overlay")
+            overlay_cb.setEnabled(False)
             glay.addWidget(btn)
             glay.addWidget(lbl)
+            glay.addWidget(overlay_cb)
             layout.addWidget(grp)
             self._file_btns.append(btn)
             self._fname_labels.append(lbl)
+            self._overlay_checks.append(overlay_cb)
         self._file_btns[0].clicked.connect(lambda: self._pick_file(0))
         self._file_btns[1].clicked.connect(lambda: self._pick_file(1))
+        self._overlay_checks[0].toggled.connect(
+            lambda checked: self._on_overlay_toggled(0, checked)
+        )
+        self._overlay_checks[1].toggled.connect(
+            lambda checked: self._on_overlay_toggled(1, checked)
+        )
 
         # mode (Slice / MIP)
         grp_mode = QGroupBox("Mode")
@@ -306,7 +319,7 @@ class MainWindow(QMainWindow):
         grp_cmap = QGroupBox("Colormap")
         cmap_lay = QVBoxLayout(grp_cmap)
         self._cmap_combo = QComboBox()
-        for cm in ("hot_metal_blue", "gray", "hot", "afmhot", "viridis", "plasma"):
+        for cm in ("hot_metal_blue", "gray", "afmhot", "viridis", "plasma"):
             self._cmap_combo.addItem(cm)
         cmap_lay.addWidget(self._cmap_combo)
         layout.addWidget(grp_cmap)
@@ -343,8 +356,16 @@ class MainWindow(QMainWindow):
         self._im1 = self._ax1.imshow(
             blank, cmap="hot_metal_blue", vmin=0, vmax=1, aspect="equal", extent=extent
         )
+        self._im1_overlay = self._ax1.imshow(
+            blank, cmap="RdYlGn", vmin=0, vmax=1, alpha=0.5, aspect="equal",
+            extent=extent, visible=False,
+        )
         self._im2 = self._ax2.imshow(
             blank, cmap="hot_metal_blue", vmin=0, vmax=1, aspect="equal", extent=extent
+        )
+        self._im2_overlay = self._ax2.imshow(
+            blank, cmap="RdYlGn", vmin=0, vmax=1, alpha=0.5, aspect="equal",
+            extent=extent, visible=False,
         )
         self._im3 = self._ax3.imshow(
             blank, cmap="RdYlGn", vmin=0, vmax=1, aspect="equal", extent=extent
@@ -420,6 +441,8 @@ class MainWindow(QMainWindow):
             self._vol_label.setText("")
             self._metrics_label.setText("")
             self._placeholders[2].set_visible(True)
+        for cb in self._overlay_checks:
+            cb.setEnabled(both)
         self._redraw()
 
     def _redraw(self) -> None:
@@ -432,6 +455,8 @@ class MainWindow(QMainWindow):
         ):
             im.set_extent(extent)
             ax.set_aspect("equal")
+        for ov in (self._im1_overlay, self._im2_overlay):
+            ov.set_extent(extent)
 
         if self._mip_mode:
             s = [
@@ -451,12 +476,22 @@ class MainWindow(QMainWindow):
             self._im1.set_data(s[0])
         if s[1] is not None:
             self._im2.set_data(s[1])
+
+        ssim_map: np.ndarray | None = None
         if s[0] is not None and s[1] is not None:
             mse, mae, ssim_val, ssim_map = compute_slice_metrics(s[0], s[1])
             self._im3.set_data(ssim_map)
             self._metrics_label.setText(
                 f"{slice_label} — MSE: {mse:.4f} | MAE: {mae:.4f} | SSIM: {ssim_val:.4f}"
             )
+
+        for i, ov in enumerate((self._im1_overlay, self._im2_overlay)):
+            if self._overlay_enabled[i] and ssim_map is not None:
+                ov.set_data(ssim_map)
+                ov.set_visible(True)
+            else:
+                ov.set_visible(False)
+
         self._fig.canvas.draw_idle()
 
     # --- Qt signal handlers --------------------------------------------------
@@ -492,6 +527,10 @@ class MainWindow(QMainWindow):
         self._im1.set_cmap(name)
         self._im2.set_cmap(name)
         self._fig.canvas.draw_idle()
+
+    def _on_overlay_toggled(self, idx: int, checked: bool) -> None:
+        self._overlay_enabled[idx] = checked
+        self._redraw()
 
 
 # --- entry point -------------------------------------------------------------
