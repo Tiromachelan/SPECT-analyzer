@@ -411,11 +411,17 @@ class MainWindow(QMainWindow):
         grp_cmap = QGroupBox("Colormap")
         cmap_lay = QVBoxLayout(grp_cmap)
         self._cmap_combo = QComboBox()
-        for cm in ("hot_metal_blue", "gray", "afmhot", "viridis", "plasma"):
-            self._cmap_combo.addItem(cm)
+        for label, key in (
+            ("Hot Metal Blue", "hot_metal_blue"),
+            ("Gray", "gray"),
+            ("Afmhot", "afmhot"),
+            ("Viridis", "viridis"),
+            ("Plasma", "plasma"),
+        ):
+            self._cmap_combo.addItem(label, key)
         cmap_lay.addWidget(self._cmap_combo)
         layout.addWidget(grp_cmap)
-        self._cmap_combo.currentTextChanged.connect(self._on_cmap_changed)
+        self._cmap_combo.currentIndexChanged.connect(self._on_cmap_changed)
 
         # brightness / contrast
         grp_bc = QGroupBox("Brightness / Contrast")
@@ -518,7 +524,7 @@ class MainWindow(QMainWindow):
         self._im3 = self._ax3.imshow(
             blank, cmap="RdYlGn", vmin=0, vmax=1, aspect="equal", extent=extent
         )
-        self._fig.colorbar(self._im3, ax=self._ax3, fraction=0.046, pad=0.04)
+        self._cbar = self._fig.colorbar(self._im3, ax=self._ax3, fraction=0.046, pad=0.04)
 
         self._ax1.set_title("File 1")
         self._ax2.set_title("File 2")
@@ -542,11 +548,36 @@ class MainWindow(QMainWindow):
             ),
         ]
 
+        # Capture 3-panel positions (after colorbar has adjusted ax3) for later restore.
+        self._pos_3panel = [ax.get_position() for ax in (self._ax1, self._ax2, self._ax3)]
+        self._cbar_pos_3panel = self._cbar.ax.get_position()
+        self._comparison_visible = False
+
+        # Start in single-panel mode: hide panels 2 & 3, expand panel 1.
+        self._ax2.set_visible(False)
+        self._ax3.set_visible(False)
+        self._cbar.ax.set_visible(False)
+        self._ax1.set_position([0.05, 0.04, 0.90, 0.84])
+
         canvas = FigureCanvasQTAgg(self._fig)
         canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         return canvas
+
+    # --- comparison panel expansion ------------------------------------------
+
+    def _expand_to_comparison(self) -> None:
+        """Transition from single-panel to three-panel layout."""
+        self._ax1.set_position(self._pos_3panel[0])
+        self._ax2.set_position(self._pos_3panel[1])
+        self._ax3.set_position(self._pos_3panel[2])
+        self._cbar.ax.set_position(self._cbar_pos_3panel)
+        self._ax2.set_visible(True)
+        self._ax3.set_visible(True)
+        self._cbar.ax.set_visible(True)
+        self._comparison_visible = True
+        self._fig.canvas.draw_idle()
 
     # --- file loading --------------------------------------------------------
 
@@ -642,6 +673,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_state(self) -> None:
         both = self._vols[0] is not None and self._vols[1] is not None
+        if both and not self._comparison_visible:
+            self._expand_to_comparison()
         if both:
             if self._auto_threshold == 0.0:
                 self._auto_threshold = compute_mask_threshold(
@@ -761,7 +794,8 @@ class MainWindow(QMainWindow):
         if not self._mip_mode:
             self._redraw()
 
-    def _on_cmap_changed(self, name: str) -> None:
+    def _on_cmap_changed(self, _index: int) -> None:
+        name = self._cmap_combo.currentData()
         self._colormap = name
         self._im1.set_cmap(name)
         self._im2.set_cmap(name)
