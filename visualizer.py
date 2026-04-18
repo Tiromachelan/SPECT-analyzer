@@ -407,6 +407,20 @@ class MainWindow(QMainWindow):
             )
         layout.addWidget(grp_view)
 
+        # slice slider
+        grp_slice = QGroupBox("Slice")
+        slice_lay = QVBoxLayout(grp_slice)
+        self._slice_slider = QSlider(Qt.Orientation.Horizontal)
+        self._slice_slider.setMinimum(1)
+        self._slice_slider.setMaximum(64)
+        self._slice_slider.setValue(1)
+        self._slice_val_label = QLabel("1 / 64")
+        self._slice_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slice_lay.addWidget(self._slice_slider)
+        slice_lay.addWidget(self._slice_val_label)
+        layout.addWidget(grp_slice)
+        self._slice_slider.valueChanged.connect(self._on_slice_changed)
+
         # colormap
         grp_cmap = QGroupBox("Colormap")
         cmap_lay = QVBoxLayout(grp_cmap)
@@ -454,20 +468,6 @@ class MainWindow(QMainWindow):
         self._brightness_slider.valueChanged.connect(self._on_brightness_changed)
         self._contrast_slider.valueChanged.connect(self._on_contrast_changed)
         self._bc_reset_btn.clicked.connect(self._on_bc_reset)
-
-        # slice slider
-        grp_slice = QGroupBox("Slice")
-        slice_lay = QVBoxLayout(grp_slice)
-        self._slice_slider = QSlider(Qt.Orientation.Horizontal)
-        self._slice_slider.setMinimum(1)
-        self._slice_slider.setMaximum(64)
-        self._slice_slider.setValue(1)
-        self._slice_val_label = QLabel("1 / 64")
-        self._slice_val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        slice_lay.addWidget(self._slice_slider)
-        slice_lay.addWidget(self._slice_val_label)
-        layout.addWidget(grp_slice)
-        self._slice_slider.valueChanged.connect(self._on_slice_changed)
 
         # mask controls
         grp_mask = QGroupBox("Mask")
