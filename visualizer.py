@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
 
         bc_lay.addWidget(QLabel("Contrast"))
         self._contrast_slider = QSlider(Qt.Orientation.Horizontal)
-        self._contrast_slider.setMinimum(1)
+        self._contrast_slider.setMinimum(0)
         self._contrast_slider.setMaximum(200)
         self._contrast_slider.setValue(100)
         self._contrast_val_label = QLabel("1.00")
@@ -826,13 +826,13 @@ class MainWindow(QMainWindow):
         self._refresh_state()
 
     def _on_brightness_changed(self, val: int) -> None:
-        self._brightness = val / 100.0
-        self._brightness_val_label.setText(f"{self._brightness:.2f}")
+        self._brightness = (100 - val) / 100.0
+        self._brightness_val_label.setText(f"{val / 100.0:.2f}")
         self._redraw()
 
     def _on_contrast_changed(self, val: int) -> None:
-        self._contrast = val / 100.0
-        self._contrast_val_label.setText(f"{self._contrast:.2f}")
+        self._contrast = (200 - val) / 100.0
+        self._contrast_val_label.setText(f"{val / 100.0:.2f}")
         self._redraw()
 
     def _on_bc_reset(self) -> None:
