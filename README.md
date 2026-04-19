@@ -5,14 +5,7 @@ A desktop tool for side-by-side comparison of two reconstructed SPECT scans. Loa
 ## Requirements
 
 - Python 3.14+
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
-
-Dependencies (installed automatically via `uv sync`):
-
-- numpy
-- matplotlib
-- scikit-image
-- PySide6
+- uv
 
 ## Installation
 
@@ -24,28 +17,16 @@ uv sync
 
 ## Running
 
-Open the window and load files interactively:
-
 ```bash
 uv run visualizer.py
 ```
 
-Load both files from the command line:
-
-```bash
-uv run visualizer.py path/to/first.raw path/to/second.raw
-```
-
-Or with the virtual environment activated:
-
-```bash
-source .venv/bin/activate
-python visualizer.py path/to/first.raw path/to/second.raw
-```
-
 ## Data Format
 
-Input files must be flat binary arrays of 32-bit floats (`.raw`). Each file must contain exactly 64 slices of 128x128 pixels (4,194,304 bytes total). Data is interpreted in slice-first order: `vol[z, y, x]`.
+Input files must be flat binary arrays of 32-bit floats (`.raw`). 
+- **Pre-Reconstructed Volumes**: Must be exactly 64 slices of 128x128 pixels (4,194,304 bytes total).  Data is interpreted in slice-first order: `vol[z, y, x]`.
+
+- **Sinograms**: Exactly 120 128x128 images (7,864,320 bytes total)
 
 ## Interface Overview
 
@@ -58,8 +39,8 @@ The window is divided into a left control panel and a three-panel display area. 
 
 | Panel | Content |
 |---|---|
-| Left | File 1, displayed with the selected colormap |
-| Center | File 2, displayed with the selected colormap |
+| Left | File 1 |
+| Center | File 2 |
 | Right | SSIM heatmap (red = low similarity, green = high similarity) |
 
 Each volume is independently normalized to [0, 1] before display.
@@ -88,21 +69,21 @@ Selects the anatomical orientation of the slice plane:
 
 Switching orientation updates the slider range and redraws the display.
 
+#### Slice
+
+A horizontal slider that selects which slice to display. The current position is shown as `N / total`. Disabled in MIP mode.
+
 #### Colormap
 
 Selects the colormap applied to both scan panels. The SSIM heatmap always uses RdYlGn regardless of this setting.
 
 | Option | Description |
 |---|---|
-| hot_metal_blue | Custom nuclear medicine colormap (default) |
-| gray | Standard grayscale |
-| afmhot | Sequential warm colormap |
-| viridis | Perceptually uniform, blue to yellow |
-| plasma | Perceptually uniform, blue to orange |
-
-#### Slice
-
-A horizontal slider that selects which slice to display. The current position is shown as `N / total`. Disabled in MIP mode.
+| Hot Metal Blue | Custom nuclear medicine colormap (default) |
+| Gray | Standard grayscale |
+| Afmhot | Sequential warm colormap |
+| Viridis | Perceptually uniform, blue to yellow |
+| Plasma | Perceptually uniform, blue to orange |
 
 #### Mask
 
