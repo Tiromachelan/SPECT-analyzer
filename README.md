@@ -1,6 +1,6 @@
 # SPECT-analyzer
 
-A desktop tool for side-by-side comparison of two reconstructed SPECT scans. Load two `.raw` files and interactively inspect per-slice and whole-volume similarity metrics, with controls for orientation, colormap, MIP projection, and background masking.
+A desktop tool for instant reconstruction and side-by-side comparison of two SPECT scans. Load two `.raw` files and interactively inspect per-slice and whole-volume similarity metrics, with controls for orientation, colormap, MIP projection, and background masking.
 
 ## Requirements
 
